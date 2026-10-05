@@ -1,109 +1,196 @@
 <!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Pac-Man RL</title>
-<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
-<style>
-:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
---bg:#f4f4fb;--fg:#15163a;--card:#e3e4f5;--btn:#2f3cff;--btnfg:#fff}
-html{scroll-padding-top:env(safe-area-inset-top,0px)}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0d0f2b;--fg:#eceeff;--card:#181b4a;--btn:#ffd400;--btnfg:#15163a}}
-:root[data-theme="dark"]{--bg:#0d0f2b;--fg:#eceeff;--card:#181b4a;--btn:#ffd400;--btnfg:#15163a}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;padding:16px;gap:12px}
-h1{font:18px/1.3 "Press Start 2P",monospace;margin:4px 0;text-align:center}
-#wrap{width:100%;max-width:540px}
-canvas{width:100%;height:auto;display:block;border-radius:10px;background:#000;touch-action:none}
-.row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
-button,select{font:inherit;font-weight:600;padding:9px 14px;border-radius:8px;border:2px solid var(--btn);background:var(--card);color:var(--fg);cursor:pointer}
-button.on{background:var(--btn);color:var(--btnfg)}
-button:focus-visible,select:focus-visible{outline:3px solid var(--fg);outline-offset:2px}
-#stats,#msg{background:var(--card);border-radius:8px;padding:10px 12px;margin-top:10px;font-size:14px}
-#msg{min-height:1.5em}
-</style></head><body>
-<h1>Pac-Man RL</h1>
-<div id="wrap">
-<canvas id="c" width="540" height="420"></canvas>
-<div class="row">
-<button id="bh">Play myself</button><button id="bw">Watch AI</button>
-<button id="bt">Train AI +1000 games</button><button id="br">Reset AI</button>
-<select id="sp" aria-label="Speed"><option value="220">Slow</option><option value="120" selected>Normal</option><option value="45">Fast</option></select>
-</div>
-<div id="msg"></div><div id="stats"></div>
-<p style="font-size:14px">Controls: arrow keys, WASD, or swipe. The AI is a Q-learning agent. It sees your position, where the nearest ghost is, and which way the nearest pellet lies. Train it a few thousand games, then watch it play.</p>
-</div>
-<script>
-const L=["#########","#P..#...#","#.#.#.#.#","#.......#","#.#.#.#.#","#..G....#","#########"];
-const H=7,W=9,T=60,CH=0.3,A=[[-1,0],[1,0],[0,-1],[0,1]];
-let walls=[],pel0=[],P0,G0=[],S;
-L.forEach((row,r)=>{walls[r]=[];pel0[r]=[];[...row].forEach((ch,c)=>{walls[r][c]=ch=="#"?1:0;pel0[r][c]=ch=="."?1:0;if(ch=="P")P0=[r,c];if(ch=="G")G0.push([r,c])})});
-function reset(){S={pel:pel0.map(r=>[...r]),pac:[...P0],g:G0.map(g=>[...g]),n:0,done:false,won:false,died:false};S.left=S.pel.flat().reduce((a,b)=>a+b,0)}
-function moveGhost(g){let m=[];for(const[d,e]of A){const r=g[0]+d,c=g[1]+e;if(!walls[r][c])m.push([r,c])}
- if(Math.random()<CH){const ds=m.map(x=>Math.abs(x[0]-S.pac[0])+Math.abs(x[1]-S.pac[1])),b=Math.min(...ds);m=m.filter((x,i)=>ds[i]==b)}
- return m[Math.floor(Math.random()*m.length)]}
-function step(a){
- S.n++;let rw=-0.1;const old=S.pac,nr=old[0]+A[a][0],nc=old[1]+A[a][1];
- if(!walls[nr][nc])S.pac=[nr,nc];
- const[pr,pc]=S.pac;
- if(S.pel[pr][pc]){S.pel[pr][pc]=0;S.left--;rw+=10}
- const hit=()=>S.g.some(g=>g[0]==S.pac[0]&&g[1]==S.pac[1]);
- if(hit()){rw-=100;S.died=S.done=true}
- else if(S.left==0){rw+=100;S.won=S.done=true}
- else{const og=S.g;S.g=og.map(moveGhost);
-  const sw=og.some((g,i)=>g[0]==S.pac[0]&&g[1]==S.pac[1]&&S.g[i][0]==old[0]&&S.g[i][1]==old[1]);
-  if(hit()||sw){rw-=100;S.died=S.done=true}}
- if(!S.done&&S.n>=200)S.done=true;
- return rw}
-// ---- Q-learning agent (tabular) ----
-function firstDir(){const[pr,pc]=S.pac,seen=new Set([pr*W+pc]),q=[[pr,pc,-1]];
- for(let i=0;i<q.length;i++){const[r,c,f]=q[i];if(f>=0&&S.pel[r][c])return f;
-  A.forEach(([d,e],k)=>{const a=r+d,b=c+e;if(!walls[a][b]&&!seen.has(a*W+b)){seen.add(a*W+b);q.push([a,b,f<0?k:f])}})}
- return 4}
-function key(){const[pr,pc]=S.pac;let best=S.g[0],bd=99;
- for(const g of S.g){const d=Math.abs(g[0]-pr)+Math.abs(g[1]-pc);if(d<bd){bd=d;best=g}}
- const cl=v=>Math.max(-3,Math.min(3,v));
- return pr*W+pc+"|"+cl(best[0]-pr)+","+cl(best[1]-pc)+"|"+firstDir()}
-let Q=new Map(),eps=1,ep=0,hist=[];
-const qv=k=>{let v=Q.get(k);if(!v){v=[0,0,0,0];Q.set(k,v)}return v};
-function aiAct(k,e){if(Math.random()<e)return Math.floor(Math.random()*4);
- const v=qv(k),m=Math.max(...v),b=[];v.forEach((x,i)=>{if(x==m)b.push(i)});return b[Math.floor(Math.random()*b.length)]}
-function aiStep(learn){const k=key(),a=aiAct(k,learn?eps:0.02),r=step(a);
- if(learn){const v=qv(k),t=(S.died||S.won)?r:r+0.95*Math.max(...qv(key()));v[a]+=0.2*(t-v[a])}}
-// ---- UI / loop ----
-const cv=document.getElementById("c"),x=cv.getContext("2d"),$=id=>document.getElementById(id);
-let mode="idle",dir=null,face=3,wait=0,busy=false,wW=0,wN=0,timer;
-function draw(){x.fillStyle="#05061a";x.fillRect(0,0,W*T,H*T);
- for(let r=0;r<H;r++)for(let c=0;c<W;c++){
-  if(walls[r][c]){x.fillStyle="#2f3cff";x.beginPath();x.roundRect(c*T+3,r*T+3,T-6,T-6,10);x.fill()}
-  else if(S.pel[r][c]){x.fillStyle="#ffe9b0";x.beginPath();x.arc(c*T+T/2,r*T+T/2,5,0,7);x.fill()}}
- const cx=S.pac[1]*T+T/2,cy=S.pac[0]*T+T/2,m=S.n%2?0.15:0.65,rot=[-Math.PI/2,Math.PI/2,Math.PI,0][face];
- x.fillStyle="#ffd400";x.beginPath();x.moveTo(cx,cy);x.arc(cx,cy,T/2-6,rot+m,rot+2*Math.PI-m);x.fill();
- for(const g of S.g){const gx=g[1]*T+T/2,gy=g[0]*T+T/2;x.fillStyle="#ff4d5e";x.beginPath();x.arc(gx,gy-2,T/2-7,Math.PI,0);
-  x.lineTo(gx+T/2-7,gy+T/2-8);x.lineTo(gx-T/2+7,gy+T/2-8);x.fill();
-  x.fillStyle="#fff";[-9,9].forEach(o=>{x.beginPath();x.arc(gx+o,gy-5,6,0,7);x.fill()});
-  x.fillStyle="#15163a";[-9,9].forEach(o=>{x.beginPath();x.arc(gx+o+2,gy-4,3,0,7);x.fill()})}
- if(S.done){x.fillStyle="rgba(0,0,0,.6)";x.fillRect(0,H*T/2-40,W*T,80);x.fillStyle=S.won?"#7dff9a":S.died?"#ff4d5e":"#ffe9b0";
-  x.font="22px 'Press Start 2P',monospace";x.textAlign="center";x.fillText(S.won?"CLEARED!":S.died?"CAUGHT!":"TIME UP",W*T/2,H*T/2+8)}}
-function stats(){const w=hist.reduce((a,b)=>a+b,0);
- $("stats").textContent=`AI trained: ${ep} games. Exploration: ${Math.round(eps*100)}%. Win rate over its last ${hist.length}: ${hist.length?Math.round(100*w/hist.length):0}%. Situations learned: ${Q.size}.`+(wN?` Watching: ${wW} of ${wN} won.`:"")}
-function tick(){
- if(mode=="human"){if(!S.done&&dir!=null){face=dir;step(dir)}}
- else if(mode=="watch"){if(S.done){if(++wait>8){wN++;wW+=S.won?1:0;wait=0;reset();stats()}}else{const k=key(),a=aiAct(k,0.02);face=a;step(a)}}
- draw()}
-function setMode(m){mode=m;dir=null;wait=0;reset();["bh","bw"].forEach(i=>$(i).classList.remove("on"));
- if(m=="human"){$("bh").classList.add("on");$("msg").textContent="Your turn. Press an arrow key to start. Eat every dot and dodge the ghost."}
- if(m=="watch"){$("bw").classList.add("on");wN=wW=0;$("msg").textContent=Q.size?"Watching the AI play with what it has learned.":"The AI knows nothing yet. Train it first, then watch."}
- draw();stats()}
-function loop(){clearInterval(timer);timer=setInterval(tick,+$("sp").value)}
-function train(n){if(busy)return;busy=true;$("msg").textContent="Training...";let left=n;
- (function chunk(){for(let i=0;i<50&&left>0;i++,left--){reset();while(!S.done)aiStep(true);ep++;hist.push(S.won?1:0);if(hist.length>100)hist.shift();eps=Math.max(0.03,eps*0.999)}
-  stats();if(left>0)setTimeout(chunk,0);else{busy=false;$("msg").textContent="Training done. Press Watch AI.";reset();draw()}})()}
-$("bh").onclick=()=>setMode("human");$("bw").onclick=()=>setMode("watch");
-$("bt").onclick=()=>train(1000);$("br").onclick=()=>{Q=new Map();eps=1;ep=0;hist=[];wN=wW=0;stats();$("msg").textContent="AI reset."};
-$("sp").onchange=loop;
-const K={ArrowUp:0,w:0,ArrowDown:1,s:1,ArrowLeft:2,a:2,ArrowRight:3,d:3};
-addEventListener("keydown",e=>{if(e.key in K){e.preventDefault();if(mode!="human")return;if(S.done){reset()}dir=K[e.key]}});
-let t0;cv.addEventListener("touchstart",e=>{t0=e.touches[0]});
-cv.addEventListener("touchend",e=>{if(mode!="human"||!t0)return;const t=e.changedTouches[0],dx=t.clientX-t0.clientX,dy=t.clientY-t0.clientY;
- if(Math.max(Math.abs(dx),Math.abs(dy))<20)return;if(S.done)reset();dir=Math.abs(dx)>Math.abs(dy)?(dx>0?3:2):(dy>0?1:0)});
-reset();draw();stats();$("msg").textContent="Choose Play myself, or train the AI and watch it.";loop();
-</script></body></html>
+<html>
+<head>
+  <title>Pacman Q-learning</title>
+  <style>
+    body { background: #111; color: white; font-family: Arial; text-align: center; }
+    canvas { background: #0a0a28; }
+  </style>
+</head>
+<body>
+  <h2>Pacman Q-learning</h2>
+  <p id="info">Training, please wait...</p>
+  <canvas id="game" width="500" height="500"></canvas>
+
+  <script>
+    var SIZE = 10;
+    var CELL = 50;
+    var MAX_STEPS = 120;
+    var ALPHA = 0.1;
+    var GAMMA = 0.95;
+    var MOVES = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+
+    var Q = {};
+
+    var canvas = document.getElementById("game");
+    var ctx = canvas.getContext("2d");
+    var info = document.getElementById("info");
+
+    function clamp(n) {
+      return Math.min(Math.max(n, 0), SIZE - 1);
+    }
+
+    function newGame() {
+      return {
+        pac: [0, 0],
+        ghost: [9, 9],
+        pellets: [[0, 9], [9, 0], [4, 4], [2, 7], [7, 2], [5, 5]]
+      };
+    }
+
+    function same(a, b) {
+      return a[0] == b[0] && a[1] == b[1];
+    }
+
+    // returns [newState, reward, gameOver]
+    function step(state, action) {
+      var pac = [clamp(state.pac[0] + MOVES[action][0]), clamp(state.pac[1] + MOVES[action][1])];
+      var ghost = state.ghost;
+      var pellets = state.pellets;
+      var reward = -1;
+
+      // ate a pellet?
+      var left = [];
+      for (var i = 0; i < pellets.length; i++) {
+        if (same(pellets[i], pac)) {
+          reward += 10;
+        } else {
+          left.push(pellets[i]);
+        }
+      }
+      pellets = left;
+
+      if (same(pac, ghost)) {
+        return [{ pac: pac, ghost: ghost, pellets: pellets }, reward - 50, true];
+      }
+      if (pellets.length == 0) {
+        return [{ pac: pac, ghost: ghost, pellets: pellets }, reward + 50, true];
+      }
+
+      // ghost moves randomly
+      var m = MOVES[Math.floor(Math.random() * 4)];
+      ghost = [clamp(ghost[0] + m[0]), clamp(ghost[1] + m[1])];
+      if (same(pac, ghost)) {
+        return [{ pac: pac, ghost: ghost, pellets: pellets }, reward - 50, true];
+      }
+      return [{ pac: pac, ghost: ghost, pellets: pellets }, reward, false];
+    }
+
+    // turn a state into a string so we can use it as a key
+    function getKey(state) {
+      return state.pac + "|" + state.ghost + "|" + state.pellets;
+    }
+
+    function getQ(state) {
+      var k = getKey(state);
+      if (!Q[k]) {
+        Q[k] = [0, 0, 0, 0];
+      }
+      return Q[k];
+    }
+
+    function chooseAction(state, epsilon) {
+      if (Math.random() < epsilon) {
+        return Math.floor(Math.random() * 4);
+      }
+      var values = getQ(state);
+      var best = Math.max.apply(null, values);
+      var options = [];
+      for (var a = 0; a < 4; a++) {
+        if (values[a] == best) options.push(a);
+      }
+      return options[Math.floor(Math.random() * options.length)];
+    }
+
+    function learn(state, action, reward, nextState, over) {
+      var future = 0;
+      if (!over) {
+        future = Math.max.apply(null, getQ(nextState));
+      }
+      var target = reward + GAMMA * future;
+      var values = getQ(state);
+      values[action] += ALPHA * (target - values[action]);
+    }
+
+    // plays one game, returns true if pacman won
+    function playEpisode(epsilon, training) {
+      var state = newGame();
+      for (var i = 0; i < MAX_STEPS; i++) {
+        var action = chooseAction(state, epsilon);
+        var result = step(state, action);
+        if (training) {
+          learn(state, action, result[1], result[0], result[2]);
+        }
+        state = result[0];
+        if (result[2]) break;
+      }
+      return state.pellets.length == 0 && !same(state.pac, state.ghost);
+    }
+
+    function train(episodes) {
+      for (var ep = 1; ep <= episodes; ep++) {
+        var epsilon = Math.max(0.05, 1 - ep / (episodes * 0.7));
+        playEpisode(epsilon, true);
+
+        if (ep % 5000 == 0) {
+          var wins = 0;
+          for (var i = 0; i < 200; i++) {
+            if (playEpisode(0, false)) wins++;
+          }
+          console.log("game " + ep + " | win rate: " + (wins / 2) + "%");
+        }
+      }
+    }
+
+    function draw(state) {
+      ctx.fillStyle = "#0a0a28";
+      ctx.fillRect(0, 0, 500, 500);
+
+      // pellets
+      ctx.fillStyle = "white";
+      for (var i = 0; i < state.pellets.length; i++) {
+        var p = state.pellets[i];
+        ctx.beginPath();
+        ctx.arc(p[1] * CELL + 25, p[0] * CELL + 25, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // pacman
+      ctx.fillStyle = "yellow";
+      ctx.beginPath();
+      ctx.arc(state.pac[1] * CELL + 25, state.pac[0] * CELL + 25, 21, 0, Math.PI * 2);
+      ctx.fill();
+
+     
+      ctx.fillStyle = "red";
+      ctx.fillRect(state.ghost[1] * CELL + 8, state.ghost[0] * CELL + 8, 34, 34);
+    }
+
+    // watch the trained pacman play forever
+    var state = newGame();
+    var steps = 0;
+
+    function tick() {
+      var action = chooseAction(state, 0);
+      var result = step(state, action);
+      state = result[0];
+      steps++;
+      draw(state);
+
+      if (result[2] || steps >= MAX_STEPS) {
+        setTimeout(function () {
+          state = newGame();
+          steps = 0;
+          tick();
+        }, 700);
+      } else {
+        setTimeout(tick, 170);
+      }
+    }
+
+    train(60000);
+    info.innerHTML = "Done training. Watching Pacman play.";
+    tick();
+  </script>
+</body>
+</html>
